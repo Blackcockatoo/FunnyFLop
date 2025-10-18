@@ -4,6 +4,40 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>B$S — Ritual Vite</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Changa:wght@600;700&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      tailwind = {
+        config: {
+          theme: {
+            extend: {
+              colors: {
+                ritual: {
+                  midnight: '#020617',
+                  panel: '#0f172a',
+                },
+              },
+              fontFamily: {
+                sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+                display: ['Changa', 'Inter', 'ui-sans-serif', 'system-ui'],
+              },
+              boxShadow: {
+                glow: '0 25px 65px -35px rgba(56, 189, 248, 0.6)',
+              },
+              backgroundImage: {
+                'ritual-grid':
+                  'radial-gradient(circle at 25% 20%, rgba(56, 189, 248, 0.18), transparent 55%), radial-gradient(circle at 75% 15%, rgba(168, 85, 247, 0.15), transparent 60%), radial-gradient(circle at 50% 80%, rgba(16, 185, 129, 0.12), transparent 65%)',
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
   </head>
   <body>
     <div id="root"></div>
