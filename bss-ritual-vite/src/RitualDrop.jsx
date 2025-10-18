@@ -29,6 +29,66 @@ const GLYPH_SYMBOL = {
   label: 'Sigil Glyph',
 };
 
+const FAMILY_GRADIENTS = {
+  red: ['#f87171', '#fb7185'],
+  blue: ['#38bdf8', '#6366f1'],
+  black: ['#475569', '#1e293b'],
+  treasure: ['#fbbf24', '#f97316'],
+  arcane: ['#c084fc', '#22d3ee'],
+  legend: ['#f472b6', '#60a5fa'],
+  royal: ['#fcd34d', '#fb923c'],
+  neutral: ['#94a3b8', '#cbd5f5'],
+};
+
+const RARITY_GLOWS = {
+  common: '0 0 0 1px rgba(148, 163, 184, 0.35)',
+  uncommon: '0 0 25px rgba(34, 197, 94, 0.4)',
+  rare: '0 0 28px rgba(129, 140, 248, 0.45)',
+  mythic: '0 0 32px rgba(253, 224, 71, 0.55)',
+};
+
+const RARITY_ACCENTS = {
+  common: 'border-slate-600/60 bg-slate-800/80 text-slate-200',
+  uncommon: 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100',
+  rare: 'border-indigo-400/40 bg-indigo-500/20 text-indigo-100',
+  mythic: 'border-amber-400/50 bg-amber-400/20 text-amber-100',
+};
+
+const getSymbolVisuals = (symbol, { isSelected = false, isPowerTarget = false } = {}) => {
+  if (!symbol) {
+    let emptyShadow = 'inset 0 0 0 1px rgba(51, 65, 85, 0.45), inset 0 -25px 60px -50px rgba(148, 163, 184, 0.8)';
+    if (isPowerTarget) {
+      emptyShadow = `0 0 18px rgba(56, 189, 248, 0.6), ${emptyShadow}`;
+    }
+    return {
+      background: 'radial-gradient(circle at 30% 25%, rgba(148, 163, 184, 0.16), rgba(15, 23, 42, 0.9))',
+      color: '#475569',
+      boxShadow: emptyShadow,
+      border: '1px solid rgba(71, 85, 105, 0.45)',
+    };
+  }
+
+  const [from, to] = FAMILY_GRADIENTS[symbol.family] || ['#64748b', '#1e293b'];
+  const baseShadow = RARITY_GLOWS[symbol.rarity] || '0 0 18px rgba(148, 163, 184, 0.35)';
+  let boxShadow = `${baseShadow}, inset 0 0 0 1px rgba(255, 255, 255, 0.12)`;
+  if (isSelected) {
+    boxShadow = `0 0 24px rgba(250, 204, 21, 0.7), ${boxShadow}`;
+  }
+  if (isPowerTarget) {
+    boxShadow = `0 0 26px rgba(56, 189, 248, 0.65), ${boxShadow}`;
+  }
+
+  const textColor =
+    symbol.family === 'black' ? '#e2e8f0' : symbol.family === 'arcane' ? '#0b1120' : '#0f172a';
+
+  return {
+    background: `linear-gradient(140deg, ${from}, ${to})`,
+    color: textColor,
+    boxShadow,
+    border: '1px solid rgba(255, 255, 255, 0.16)',
+  };
+};
+
 const TRI_SHAPES = [
   [
     [0, 0],
@@ -472,9 +532,75 @@ const RitualDrop = () => {
   const [log, setLog] = useState([]);
   const [swapSelection, setSwapSelection] = useState([]);
   const [powerMode, setPowerMode] = useState(null);
+  const [recentGlow, setRecentGlow] = useState([]);
+  const [boardPulse, setBoardPulse] = useState(0);
   const rngRef = useRef(() => 0.5);
   const idRef = useRef(0);
   const queuePointerRef = useRef(0);
+  const glowTimeoutRef = useRef(null);
+
+  const ambientOrbs = useMemo(() => {
+    const localRng = mulberry32(queueInfo.rngSeed || 1);
+    const palette = [
+      'rgba(56, 189, 248, 0.32)',
+      'rgba(168, 85, 247, 0.28)',
+      'rgba(14, 165, 233, 0.26)',
+      'rgba(16, 185, 129, 0.24)',
+      'rgba(236, 72, 153, 0.24)',
+    ];
+    return Array.from({ length: 14 }, (_, idx) => {
+      const tint = palette[Math.floor(localRng() * palette.length)] || palette[0];
+      return {
+        id: idx,
+        top: `${Math.floor(localRng() * 100)}%`,
+        left: `${Math.floor(localRng() * 100)}%`,
+        size: 180 + localRng() * 240,
+        duration: 16 + localRng() * 14,
+        delay: -localRng() * 18,
+        gradient: `radial-gradient(circle at 30% 30%, ${tint}, transparent 65%)`,
+      };
+    });
+  }, [queueInfo.rngSeed]);
+
+  const shardRemainder = shardCount % 3;
+  const shardProgress = shardRemainder === 0 ? (shardCount > 0 ? 1 : 0) : shardRemainder / 3;
+  const nextShardCountdown = shardRemainder === 0 ? 3 : 3 - shardRemainder;
+
+  const activePreview = useMemo(() => {
+    if (!activePiece) return null;
+    const grid = Array.from({ length: activePiece.height }, () =>
+      Array.from({ length: activePiece.width }, () => null),
+    );
+    activePiece.blocks.forEach(({ symbol, offset: [r, c] }) => {
+      if (grid[r] && typeof grid[r][c] !== 'undefined') {
+        grid[r][c] = symbol;
+      }
+    });
+    return { grid, width: activePiece.width };
+  }, [activePiece]);
+
+  const activePieceSummary = useMemo(() => {
+    if (!activePiece) return [];
+    const summaryMap = new Map();
+    activePiece.blocks.forEach(({ symbol }) => {
+      if (!symbol) return;
+      if (!summaryMap.has(symbol.label)) {
+        summaryMap.set(symbol.label, {
+          label: symbol.label,
+          rarity: symbol.rarity,
+          char: symbol.char,
+        });
+      }
+    });
+    return Array.from(summaryMap.values());
+  }, [activePiece]);
+
+  const pieceTypeLabel = useMemo(() => {
+    if (!activePiece) return 'Awaiting draw';
+    if (activePiece.blocks.length === 3) return 'Tri Sigil';
+    if (activePiece.blocks.length === 4) return 'Tetra Sigil';
+    return `${activePiece.blocks.length}-Glyph Chain`;
+  }, [activePiece]);
 
   const resetBoardState = useCallback(() => {
     setBoard(createEmptyBoard());
@@ -496,6 +622,12 @@ const RitualDrop = () => {
     setLog([]);
     setSwapSelection([]);
     setPowerMode(null);
+    setRecentGlow([]);
+    setBoardPulse(0);
+    if (glowTimeoutRef.current) {
+      clearTimeout(glowTimeoutRef.current);
+      glowTimeoutRef.current = null;
+    }
   }, []);
 
   const drawNextPiece = useCallback(() => {
@@ -504,6 +636,7 @@ const RitualDrop = () => {
     setPowerAvailable(true);
     setSwapSelection([]);
     setPowerMode(null);
+    setRecentGlow([]);
 
     const rng = rngRef.current || (() => 0.5);
     const size = rng() < 0.45 ? 3 : 4;
@@ -532,6 +665,15 @@ const RitualDrop = () => {
     resetBoardState();
     drawNextPiece();
   }, [queueInfo, resetBoardState, drawNextPiece]);
+
+  useEffect(
+    () => () => {
+      if (glowTimeoutRef.current) {
+        clearTimeout(glowTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   const handleReset = () => {
     resetBoardState();
@@ -647,6 +789,8 @@ const RitualDrop = () => {
 
     if (cascadeEntries.length === 0) return;
 
+    setBoardPulse((prev) => prev + 1);
+
     setCascadeLog((prev) => [
       ...prev,
       {
@@ -709,6 +853,16 @@ const RitualDrop = () => {
       };
       idRef.current += 1;
     });
+
+    const glowKeys = placements.map(([r, c]) => `${r}-${c}`);
+    setRecentGlow(glowKeys);
+    if (glowTimeoutRef.current) {
+      clearTimeout(glowTimeoutRef.current);
+    }
+    glowTimeoutRef.current = setTimeout(() => {
+      setRecentGlow([]);
+      glowTimeoutRef.current = null;
+    }, 900);
 
     setBoard(placed);
     setActivePiece(null);
@@ -859,284 +1013,556 @@ const RitualDrop = () => {
   }, [turnsRemaining, score, wheelPayout, sessionBonus]);
 
   return (
-    <div className="bg-slate-950 text-slate-100 min-h-screen p-6 flex flex-col gap-6">
-      <div>
-        <h1 className="text-3xl font-bold">Ritual Drop Prototype</h1>
-        <p className="text-slate-400">Commit-reveal seeded symbol rain with cascades, royals, and glyph blooms.</p>
+    <div className="relative min-h-screen overflow-hidden bg-ritual-midnight text-slate-100">
+      <div className="pointer-events-none absolute inset-0 bg-ritual-grid opacity-75" />
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(circle at 10% 90%, rgba(34, 197, 94, 0.18), transparent 55%), radial-gradient(circle at 90% 75%, rgba(14, 165, 233, 0.15), transparent 60%)',
+          mixBlendMode: 'screen',
+        }}
+      />
+      <div className="ambient-veil pointer-events-none absolute inset-0">
+        {ambientOrbs.map((orb) => (
+          <span
+            key={orb.id}
+            className="ritual-orb"
+            style={{
+              top: orb.top,
+              left: orb.left,
+              width: orb.size,
+              height: orb.size,
+              animationDuration: `${orb.duration}s`,
+              animationDelay: `${orb.delay}s`,
+              background: orb.gradient,
+            }}
+          />
+        ))}
       </div>
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col gap-8 px-6 py-10">
+        <header className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-6">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.35em] text-sky-300/80">
+                <span className="rounded-full border border-sky-400/40 bg-sky-500/10 px-3 py-1 text-[0.6rem] tracking-[0.45em] text-sky-200">
+                  Seed Locked
+                </span>
+                <span className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-[0.6rem] tracking-[0.45em] text-emerald-200">
+                  Cascades Online
+                </span>
+              </div>
+              <h1 className="font-display text-4xl font-semibold leading-tight text-slate-50 md:text-5xl">
+                Ritual Drop Prototype
+              </h1>
+              <p className="max-w-2xl text-sm text-slate-300">
+                Commit-reveal seeded symbol rain with cascades, royal set bonuses, and glyph blooms forged inside a glassy
+                command chamber.
+              </p>
+            </div>
+            <div className="hidden rounded-3xl border border-slate-700/50 bg-slate-900/60 px-6 py-4 text-right shadow-glow backdrop-blur md:block">
+              <div className="text-xs uppercase tracking-[0.3em] text-slate-400">Entropy Band</div>
+              <div
+                className={`text-2xl font-semibold ${
+                  queueInfo.band === 'high'
+                    ? 'text-emerald-300'
+                    : queueInfo.band === 'mid'
+                    ? 'text-sky-300'
+                    : 'text-amber-300'
+                }`}
+              >
+                {queueInfo.band.toUpperCase()}
+              </div>
+              <div className="text-[0.7rem] font-mono text-slate-500">Queue #{queueInfo.queueHash.slice(0, 8)}</div>
+            </div>
+          </div>
+        </header>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="bg-slate-900 rounded-lg p-4 space-y-3">
-          <h2 className="text-xl font-semibold">Commit → Reveal</h2>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <label className="flex flex-col gap-1">
-              <span className="text-slate-400">Server Seed</span>
-              <input
-                className="bg-slate-800 rounded px-3 py-2"
-                value={serverSeed}
-                onChange={(event) => setServerSeed(event.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-slate-400">Client Nonce</span>
-              <input
-                className="bg-slate-800 rounded px-3 py-2"
-                value={clientNonce}
-                onChange={(event) => setClientNonce(event.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-slate-400">Round</span>
-              <input
-                className="bg-slate-800 rounded px-3 py-2"
-                type="number"
-                value={round}
-                onChange={(event) => setRound(Number(event.target.value))}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-slate-400">Wheel Payout</span>
-              <input
-                className="bg-slate-800 rounded px-3 py-2"
-                type="number"
-                step="0.01"
-                value={wheelPayout}
-                onChange={(event) => setWheelPayout(Number(event.target.value))}
-              />
-            </label>
-          </div>
-          <div className="text-xs text-slate-400">
-            <div>Commit Hash: <span className="font-mono text-slate-200">{sha256(serverSeed)}</span></div>
-            <div>Reveal Seed: <span className="font-mono text-slate-200">{revealSeed}</span></div>
-            <div>Queue Hash: <span className="font-mono text-slate-200">{queueInfo.queueHash}</span></div>
-            <div>Entropy Band: <span className="uppercase text-indigo-300">{queueInfo.band}</span></div>
-          </div>
-          <button
-            type="button"
-            className="bg-indigo-600 hover:bg-indigo-500 transition-colors px-4 py-2 rounded"
-            onClick={handleReset}
-          >
-            Reset Ritual
-          </button>
-        </div>
-
-        <div className="bg-slate-900 rounded-lg p-4">
-          <h2 className="text-xl font-semibold mb-3">Turn State</h2>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <div className="text-slate-400">Turns Remaining</div>
-              <div className="text-2xl font-bold">{turnsRemaining}</div>
+        <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-3xl border border-slate-800/60 bg-slate-900/70 p-6 shadow-glow backdrop-blur">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-xl font-semibold text-slate-100">Commit → Reveal</h2>
+              <span className="rounded-full bg-indigo-500/10 px-3 py-1 text-xs font-medium text-indigo-200">
+                SHA256 Queue
+              </span>
             </div>
-            <div>
-              <div className="text-slate-400">Phase</div>
-              <div className="text-2xl font-bold capitalize">{turnPhase}</div>
+            <div className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
+              <label className="flex flex-col gap-2">
+                <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Server Seed</span>
+                <input
+                  className="w-full rounded-xl border border-slate-700/60 bg-slate-900/60 px-3 py-2 text-sm text-slate-200 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                  value={serverSeed}
+                  onChange={(event) => setServerSeed(event.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-2">
+                <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Client Nonce</span>
+                <input
+                  className="w-full rounded-xl border border-slate-700/60 bg-slate-900/60 px-3 py-2 text-sm text-slate-200 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                  value={clientNonce}
+                  onChange={(event) => setClientNonce(event.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-2">
+                <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Round</span>
+                <input
+                  className="w-full rounded-xl border border-slate-700/60 bg-slate-900/60 px-3 py-2 text-sm text-slate-200 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                  type="number"
+                  value={round}
+                  onChange={(event) => setRound(Number(event.target.value))}
+                />
+              </label>
+              <label className="flex flex-col gap-2">
+                <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Wheel Payout</span>
+                <input
+                  className="w-full rounded-xl border border-slate-700/60 bg-slate-900/60 px-3 py-2 text-sm text-slate-200 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                  type="number"
+                  step="0.01"
+                  value={wheelPayout}
+                  onChange={(event) => setWheelPayout(Number(event.target.value))}
+                />
+              </label>
             </div>
-            <div>
-              <div className="text-slate-400">Score</div>
-              <div className="text-2xl font-bold">{score.toFixed(0)}</div>
-            </div>
-            <div>
-              <div className="text-slate-400">Session Multiplier</div>
-              <div className="text-2xl font-bold">×{sessionBonus.toFixed(2)}</div>
-            </div>
-          </div>
-          <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
-            <div>
-              <div className="text-slate-400">Shards</div>
-              <div className="text-xl">{shardCount}</div>
-            </div>
-            <div>
-              <div className="text-slate-400">Royals Collected</div>
-              <div className="text-xl">{royalMeter}</div>
-            </div>
-            <div>
-              <div className="text-slate-400">Combo Primed?</div>
-              <div className="text-xl">{comboBoostActive ? 'Yes' : 'No'}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col md:flex-row gap-6">
-        <div className="bg-slate-900 rounded-lg p-4 flex-1">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xl font-semibold">Ritual Board</h2>
-            <div className="flex gap-2 text-xs text-slate-400">
-              <span>Rotations left: {rotationsLeft}</span>
-              <span>Swap ready: {swapAvailable ? 'Yes' : 'No'}</span>
-              <span>Power ready: {powerAvailable ? 'Yes' : 'No'}</span>
-            </div>
-          </div>
-          <div className="grid grid-cols-7 gap-1 bg-slate-800 p-2 rounded">
-            {board.map((row, rowIdx) =>
-              row.map((cell, colIdx) => (
-                <button
-                  key={`${rowIdx}-${colIdx}`}
-                  type="button"
-                  onClick={() => handleCellClick(rowIdx, colIdx)}
-                  className={`aspect-square flex items-center justify-center rounded text-2xl transition-colors ${
-                    cell
-                      ? 'bg-slate-700 hover:bg-slate-600'
-                      : 'bg-slate-900 hover:bg-slate-800 text-slate-700'
-                  } ${
-                    swapSelection.some(([r, c]) => r === rowIdx && c === colIdx)
-                      ? 'ring-2 ring-amber-400'
-                      : ''
+            <div className="mt-5 space-y-3 rounded-2xl border border-slate-800/60 bg-slate-900/60 p-4 text-xs text-slate-400">
+              <div className="flex flex-wrap justify-between gap-2">
+                <span>Commit Hash</span>
+                <span className="font-mono text-slate-200">{sha256(serverSeed)}</span>
+              </div>
+              <div className="flex flex-wrap justify-between gap-2">
+                <span>Reveal Seed</span>
+                <span className="font-mono text-slate-200">{revealSeed}</span>
+              </div>
+              <div className="flex flex-wrap justify-between gap-2">
+                <span>Queue Hash</span>
+                <span className="font-mono text-slate-200">{queueInfo.queueHash}</span>
+              </div>
+              <div className="flex flex-wrap justify-between gap-2">
+                <span>Entropy Band</span>
+                <span
+                  className={`font-semibold ${
+                    queueInfo.band === 'high'
+                      ? 'text-emerald-300'
+                      : queueInfo.band === 'mid'
+                      ? 'text-sky-300'
+                      : 'text-amber-300'
                   }`}
                 >
-                  {cell ? cell.char : '•'}
-                </button>
-              )),
+                  {queueInfo.band.toUpperCase()}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="mt-6 inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-indigo-500 to-sky-500 px-5 py-2 text-sm font-semibold text-slate-50 shadow-lg shadow-sky-500/30 transition-transform duration-200 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400"
+              onClick={handleReset}
+            >
+              Reset Ritual
+            </button>
+          </div>
+
+          <div className="rounded-3xl border border-slate-800/60 bg-slate-900/70 p-6 shadow-glow backdrop-blur">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-xl font-semibold text-slate-100">Turn State</h2>
+              <span className="rounded-full bg-slate-800/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                {turnPhase.toUpperCase()}
+              </span>
+            </div>
+            <div className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
+              <div className="rounded-2xl border border-slate-800/60 bg-slate-900/70 px-4 py-3 shadow-inner shadow-slate-950/30">
+                <div className="text-xs uppercase tracking-[0.25em] text-slate-400">Turns Remaining</div>
+                <div className="mt-1 text-3xl font-semibold text-slate-100">{turnsRemaining}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-800/60 bg-slate-900/70 px-4 py-3 shadow-inner shadow-slate-950/30">
+                <div className="text-xs uppercase tracking-[0.25em] text-slate-400">Score</div>
+                <div className="mt-1 text-3xl font-semibold text-slate-100">{score.toFixed(0)}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-800/60 bg-slate-900/70 px-4 py-3 shadow-inner shadow-slate-950/30">
+                <div className="text-xs uppercase tracking-[0.25em] text-slate-400">Session Multiplier</div>
+                <div className="mt-1 text-2xl font-semibold text-emerald-300">×{sessionBonus.toFixed(2)}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-800/60 bg-slate-900/70 px-4 py-3 shadow-inner shadow-slate-950/30">
+                <div className="text-xs uppercase tracking-[0.25em] text-slate-400">Wheel Payout</div>
+                <div className="mt-1 text-2xl font-semibold text-sky-300">×{wheelPayout.toFixed(2)}</div>
+              </div>
+            </div>
+            <div className="mt-5 grid grid-cols-3 gap-3 text-sm">
+              <div className="rounded-2xl border border-slate-800/60 bg-slate-900/70 px-3 py-2 text-center">
+                <div className="text-xs uppercase tracking-[0.3em] text-slate-400">Shards</div>
+                <div className="text-lg font-semibold text-amber-200">{shardCount}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-800/60 bg-slate-900/70 px-3 py-2 text-center">
+                <div className="text-xs uppercase tracking-[0.3em] text-slate-400">Royals</div>
+                <div className="text-lg font-semibold text-violet-200">{royalMeter}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-800/60 bg-slate-900/70 px-3 py-2 text-center">
+                <div className="text-xs uppercase tracking-[0.3em] text-slate-400">Combo Primed</div>
+                <div className="text-lg font-semibold text-slate-100">
+                  {comboBoostActive ? 'Ready' : 'Inactive'}
+                </div>
+              </div>
+              <div className="col-span-3 rounded-2xl border border-slate-800/60 bg-slate-950/50 px-4 py-3">
+                <div className="flex items-center justify-between text-[0.7rem] uppercase tracking-[0.3em] text-slate-400">
+                  <span>Next Bonus Charge</span>
+                  <span>{nextShardCountdown} shard{nextShardCountdown === 1 ? '' : 's'} out</span>
+                </div>
+                <div className="shard-meter mt-2">
+                  <div
+                    className="shard-meter-fill"
+                    style={{ transform: `scaleX(${Math.min(Math.max(shardProgress, 0), 1)})` }}
+                  />
+                  <div className="shard-meter-glow" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-6 lg:flex-row">
+          <div className="flex-1 space-y-5 rounded-3xl border border-slate-800/60 bg-slate-900/70 p-6 shadow-glow backdrop-blur">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="font-display text-2xl font-semibold text-slate-100">Ritual Board</h2>
+                <p className="text-sm text-slate-400">Align sets, bloom glyphs, and channel cascades into the vault.</p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-300">
+                <span className="rounded-full border border-slate-700/60 bg-slate-800/60 px-3 py-1">Rotations left: {rotationsLeft}</span>
+                <span className="rounded-full border border-slate-700/60 bg-slate-800/60 px-3 py-1">Swap ready: {swapAvailable ? 'Yes' : 'No'}</span>
+                <span className="rounded-full border border-slate-700/60 bg-slate-800/60 px-3 py-1">Power ready: {powerAvailable ? 'Yes' : 'No'}</span>
+              </div>
+            </div>
+            <div className="board-shell relative overflow-hidden rounded-3xl border border-slate-800/60 bg-slate-950/40 p-4 shadow-inner shadow-slate-950/50">
+              <div className="board-grid-overlay pointer-events-none absolute inset-0" />
+              <div key={boardPulse} className="board-flash pointer-events-none absolute inset-0" />
+              <div className="relative z-10 grid grid-cols-7 gap-2">
+                {board.map((row, rowIdx) =>
+                  row.map((cell, colIdx) => {
+                    const isSelected = swapSelection.some(([r, c]) => r === rowIdx && c === colIdx);
+                    const isPowerTarget =
+                      powerMode === 'bomb' ? Boolean(cell) : powerMode === 'wild' ? !cell : false;
+                    const cellKey = `${rowIdx}-${colIdx}`;
+                    const isRecent = recentGlow.includes(cellKey);
+                    const visuals = getSymbolVisuals(cell, { isSelected, isPowerTarget });
+                    return (
+                      <button
+                        key={cellKey}
+                        type="button"
+                        onClick={() => handleCellClick(rowIdx, colIdx)}
+                        className={`group relative flex aspect-square items-center justify-center rounded-xl text-2xl font-semibold transition-all duration-200 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 ${isRecent ? 'tile-pop' : ''}`}
+                        style={{
+                          ...visuals,
+                          transition: 'all 0.28s ease',
+                          transform: isRecent ? 'translateY(-4px) scale(1.05)' : undefined,
+                          boxShadow: isRecent
+                            ? `${visuals.boxShadow}, 0 0 24px rgba(250, 204, 21, 0.45)`
+                            : visuals.boxShadow,
+                        }}
+                      >
+                        <span
+                          className="relative z-10"
+                          style={{
+                            textShadow: cell ? '0 8px 24px rgba(15, 23, 42, 0.35)' : 'none',
+                          }}
+                        >
+                          {cell ? cell.char : '•'}
+                        </span>
+                        {isRecent && (
+                          <span className="tile-glow pointer-events-none absolute inset-0" />
+                        )}
+                        {cell && (
+                          <span
+                            className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-30"
+                            style={{
+                              background:
+                                'radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.35), transparent 60%)',
+                              mixBlendMode: 'screen',
+                            }}
+                          />
+                        )}
+                      </button>
+                    );
+                  }),
+                )}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleRotate}
+                disabled={!activePiece || rotationsLeft <= 0 || turnPhase !== 'placing'}
+                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-sky-500 to-indigo-500 px-4 py-2 text-sm font-semibold text-slate-100 shadow-lg shadow-sky-500/30 transition-transform duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+              >
+                Rotate Piece
+              </button>
+              <button
+                type="button"
+                onClick={() => dropPieceAt(activePiece ? activePiece.position.col : 0)}
+                disabled={!activePiece || turnPhase !== 'placing'}
+                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-semibold text-slate-100 shadow-lg shadow-emerald-500/30 transition-transform duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+              >
+                Drop Centered
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!swapAvailable || turnPhase !== 'postPlacement') return;
+                  startSwapMode();
+                }}
+                disabled={!swapAvailable || turnPhase !== 'postPlacement'}
+                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg shadow-amber-500/30 transition-transform duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+              >
+                Swap Mode
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!powerAvailable || powers.combo <= 0) return;
+                  activateCombo();
+                }}
+                disabled={!powerAvailable || powers.combo <= 0}
+                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-purple-500 to-indigo-500 px-4 py-2 text-sm font-semibold text-slate-100 shadow-lg shadow-purple-500/30 transition-transform duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+              >
+                Prime Combo (⚡)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!powerAvailable || powers.bomb <= 0 || turnPhase !== 'postPlacement') return;
+                  setPowerMode('bomb');
+                  setPowerAvailable(false);
+                }}
+                disabled={!powerAvailable || powers.bomb <= 0 || turnPhase !== 'postPlacement'}
+                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 px-4 py-2 text-sm font-semibold text-slate-50 shadow-lg shadow-rose-500/30 transition-transform duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+              >
+                Arcane Bomb (🧿)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!powerAvailable || powers.wild <= 0 || turnPhase !== 'postPlacement') return;
+                  setPowerMode('wild');
+                  setPowerAvailable(false);
+                }}
+                disabled={!powerAvailable || powers.wild <= 0 || turnPhase !== 'postPlacement'}
+                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 px-4 py-2 text-sm font-semibold text-slate-100 shadow-lg shadow-emerald-500/30 transition-transform duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+              >
+                Seed Wild (⭐)
+              </button>
+              <button
+                type="button"
+                onClick={endTurn}
+                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-slate-600 to-slate-700 px-4 py-2 text-sm font-semibold text-slate-100 shadow-lg shadow-slate-900/40 transition-transform duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+                disabled={turnPhase === 'placing'}
+              >
+                End Turn
+              </button>
+            </div>
+            {powerMode && (
+              <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                {powerMode === 'bomb' && 'Select a cell to detonate the arcane cross.'}
+                {powerMode === 'wild' && 'Select a target column to seed a falling wild.'}
+              </div>
             )}
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handleRotate}
-              disabled={!activePiece || rotationsLeft <= 0 || turnPhase !== 'placing'}
-              className="px-4 py-2 rounded bg-blue-600 disabled:bg-slate-700"
-            >
-              Rotate Piece
-            </button>
-            <button
-              type="button"
-              onClick={() => dropPieceAt(activePiece ? activePiece.position.col : 0)}
-              disabled={!activePiece || turnPhase !== 'placing'}
-              className="px-4 py-2 rounded bg-emerald-600 disabled:bg-slate-700"
-            >
-              Drop Centered
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!swapAvailable || turnPhase !== 'postPlacement') return;
-                startSwapMode();
-              }}
-              disabled={!swapAvailable || turnPhase !== 'postPlacement'}
-              className="px-4 py-2 rounded bg-amber-600 disabled:bg-slate-700"
-            >
-              Swap Mode
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!powerAvailable || powers.combo <= 0) return;
-                activateCombo();
-              }}
-              disabled={!powerAvailable || powers.combo <= 0}
-              className="px-4 py-2 rounded bg-purple-600 disabled:bg-slate-700"
-            >
-              Prime Combo (⚡)
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!powerAvailable || powers.bomb <= 0 || turnPhase !== 'postPlacement') return;
-                setPowerMode('bomb');
-                setPowerAvailable(false);
-              }}
-              disabled={!powerAvailable || powers.bomb <= 0 || turnPhase !== 'postPlacement'}
-              className="px-4 py-2 rounded bg-rose-600 disabled:bg-slate-700"
-            >
-              Arcane Bomb (🧿)
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!powerAvailable || powers.wild <= 0 || turnPhase !== 'postPlacement') return;
-                setPowerMode('wild');
-                setPowerAvailable(false);
-              }}
-              disabled={!powerAvailable || powers.wild <= 0 || turnPhase !== 'postPlacement'}
-              className="px-4 py-2 rounded bg-teal-600 disabled:bg-slate-700"
-            >
-              Seed Wild (⭐)
-            </button>
-            <button
-              type="button"
-              onClick={endTurn}
-              className="px-4 py-2 rounded bg-slate-700"
-              disabled={turnPhase === 'placing'}
-            >
-              End Turn
-            </button>
-          </div>
-          {powerMode && (
-            <div className="mt-2 text-sm text-amber-300">
-              {powerMode === 'bomb' && 'Select a cell to detonate the arcane cross.'}
-              {powerMode === 'wild' && 'Select a column cell to seed a falling wild.'}
-            </div>
-          )}
-        </div>
 
-        <div className="w-full md:w-72 space-y-4">
-          <div className="bg-slate-900 rounded-lg p-4">
-            <h3 className="font-semibold mb-2">Piece Queue</h3>
-            <div className="flex flex-wrap gap-2 text-2xl">
-              {queueInfo.entries.slice(queuePointer, queuePointer + 10).map((entry) => (
-                <span key={entry.index} title={entry.label}>
-                  {entry.char}
+          <div className="w-full space-y-4 lg:w-72">
+            <div className="rounded-3xl border border-slate-800/60 bg-slate-900/70 p-5 shadow-glow backdrop-blur">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-slate-100">Current Drop</h3>
+                <span className="rounded-full border border-slate-700/50 bg-slate-950/60 px-3 py-1 text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                  {pieceTypeLabel}
                 </span>
-              ))}
-            </div>
-            <div className="text-xs text-slate-400 mt-2">
-              RNG Seed: <span className="font-mono text-slate-200">{queueInfo.rngSeed}</span>
-            </div>
-          </div>
-          <div className="bg-slate-900 rounded-lg p-4 text-sm space-y-2">
-            <h3 className="font-semibold">Powers Inventory</h3>
-            <div className="flex justify-between"><span>⭐ Wild Seeds</span><span>{powers.wild}</span></div>
-            <div className="flex justify-between"><span>⚡ Combo Charges</span><span>{powers.combo}</span></div>
-            <div className="flex justify-between"><span>🧿 Arcane Bombs</span><span>{powers.bomb}</span></div>
-          </div>
-          <div className="bg-slate-900 rounded-lg p-4 text-sm space-y-2">
-            <h3 className="font-semibold">Cascade Log</h3>
-            <div className="max-h-48 overflow-y-auto space-y-2">
-              {cascadeLog.map((entry, idx) => (
-                <div key={idx} className="bg-slate-800 rounded p-2">
-                  <div className="font-semibold">{entry.action}</div>
-                  {entry.cascades.map((c) => (
-                    <div key={c.cascade} className="text-xs text-slate-400">
-                      Cascade {c.cascade}: cleared {c.cleared}, +{c.scoreGain.toFixed(0)} pts
-                      {c.royals > 0 && `, royal x${c.royals}`}
-                      {c.legend && ', SIGIL BLOOM'}
-                    </div>
-                  ))}
+              </div>
+              {activePreview ? (
+                <>
+                  <div
+                    className="piece-preview mt-4 grid gap-2"
+                    style={{ gridTemplateColumns: `repeat(${activePreview.width}, minmax(0, 1fr))` }}
+                  >
+                    {activePreview.grid.map((previewRow, rIdx) =>
+                      previewRow.map((symbol, cIdx) => {
+                        const key = `${rIdx}-${cIdx}`;
+                        const visuals = getSymbolVisuals(symbol);
+                        return (
+                          <span
+                            key={key}
+                            className="relative flex aspect-square items-center justify-center rounded-lg text-lg font-semibold"
+                            style={{
+                              ...visuals,
+                              fontSize: symbol ? '1.35rem' : '0.95rem',
+                              borderRadius: '0.85rem',
+                              boxShadow: symbol ? visuals.boxShadow : 'inset 0 0 0 1px rgba(71, 85, 105, 0.35)',
+                            }}
+                          >
+                            {symbol ? symbol.char : '·'}
+                          </span>
+                        );
+                      }),
+                    )}
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                    {activePieceSummary.length > 0 ? (
+                      activePieceSummary.map((item) => (
+                        <span
+                          key={item.label}
+                          className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 font-semibold ${
+                            RARITY_ACCENTS[item.rarity] || 'border-slate-700/60 bg-slate-900/70 text-slate-200'
+                          }`}
+                        >
+                          <span>{item.char}</span>
+                          <span>{item.label}</span>
+                        </span>
+                      ))
+                    ) : (
+                      <span className="rounded-full border border-slate-700/60 bg-slate-900/70 px-3 py-1 text-slate-300">
+                        Pure glyph
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between text-[0.7rem] uppercase tracking-[0.3em] text-slate-400">
+                    <span>Spawn column</span>
+                    <span>{(activePiece?.position?.col || 0) + 1}</span>
+                  </div>
+                </>
+              ) : (
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-700/60 bg-slate-950/40 px-4 py-6 text-center text-xs text-slate-400">
+                  Queue is weaving the next glyph...
                 </div>
-              ))}
+              )}
+            </div>
+            <div className="rounded-3xl border border-slate-800/60 bg-slate-900/70 p-5 shadow-glow backdrop-blur">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-slate-100">Piece Queue</h3>
+                <span className="text-xs font-mono text-slate-500">Next 10</span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {queueInfo.entries.slice(queuePointer, queuePointer + 10).map((entry, idx) => {
+                  const badgeVisuals = getSymbolVisuals(entry);
+                  const isNext = idx === 0;
+                  return (
+                    <span
+                      key={entry.index}
+                      title={entry.label}
+                      className={`queue-chip relative inline-flex items-center justify-center rounded-lg px-3 py-2 text-lg font-semibold shadow-inner shadow-slate-950/30 ${
+                        isNext ? 'queue-chip--next' : ''
+                      }`}
+                      style={{
+                        ...badgeVisuals,
+                        borderRadius: '0.9rem',
+                      }}
+                    >
+                      {entry.char}
+                      {isNext && <span className="queue-chip-label">Next</span>}
+                    </span>
+                  );
+                })}
+              </div>
+              <div className="mt-4 rounded-2xl border border-slate-800/60 bg-slate-900/60 p-3 text-xs text-slate-400">
+                RNG Seed: <span className="font-mono text-slate-200">{queueInfo.rngSeed}</span>
+              </div>
+            </div>
+            <div className="rounded-3xl border border-slate-800/60 bg-slate-900/70 p-5 text-sm shadow-glow backdrop-blur">
+              <h3 className="font-semibold text-slate-100">Powers Inventory</h3>
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center justify-between rounded-xl border border-slate-800/60 bg-slate-950/40 px-3 py-2">
+                  <span>⭐ Wild Seeds</span>
+                  <span className="font-semibold text-emerald-200">{powers.wild}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-xl border border-slate-800/60 bg-slate-950/40 px-3 py-2">
+                  <span>⚡ Combo Charges</span>
+                  <span className="font-semibold text-purple-200">{powers.combo}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-xl border border-slate-800/60 bg-slate-950/40 px-3 py-2">
+                  <span>🧿 Arcane Bombs</span>
+                  <span className="font-semibold text-rose-200">{powers.bomb}</span>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-3xl border border-slate-800/60 bg-slate-900/70 p-5 text-sm shadow-glow backdrop-blur">
+              <h3 className="font-semibold text-slate-100">Cascade Log</h3>
+              <div className="scroll-track mt-3 max-h-48 space-y-3 overflow-y-auto pr-1">
+                {cascadeLog.map((entry, idx) => (
+                  <div key={idx} className="rounded-2xl border border-slate-800/60 bg-slate-950/50 p-3">
+                    <div className="font-semibold text-slate-200">{entry.action}</div>
+                    <div className="mt-2 space-y-1 text-xs text-slate-400">
+                      {entry.cascades.map((c) => (
+                        <div key={c.cascade}>
+                          Cascade {c.cascade}: cleared {c.cleared}, +{c.scoreGain.toFixed(0)} pts
+                          {c.royals > 0 && `, royal x${c.royals}`}
+                          {c.legend && ', SIGIL BLOOM'}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {cascadeLog.length === 0 && (
+                  <div className="rounded-2xl border border-dashed border-slate-800/60 bg-slate-950/40 p-3 text-xs text-slate-500">
+                    Cascades will be chronicled here once the ritual begins to flow.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="rounded-3xl border border-slate-800/60 bg-slate-900/70 p-5 text-sm shadow-glow backdrop-blur">
+              <h3 className="font-semibold text-slate-100">Audit Journal</h3>
+              <div className="scroll-track mt-3 max-h-40 space-y-2 overflow-y-auto pr-1 text-xs text-slate-300">
+                {log.map((item, idx) => (
+                  <div key={idx} className="rounded-xl border border-slate-800/60 bg-slate-950/40 px-3 py-2">
+                    {item}
+                  </div>
+                ))}
+                {log.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-slate-800/60 bg-slate-950/30 px-3 py-2 text-slate-500">
+                    Your actions will be logged in this ledger for provable fairness.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="rounded-3xl border border-slate-800/60 bg-gradient-to-br from-slate-900/80 via-slate-900/40 to-slate-950/80 p-5 text-sm shadow-glow backdrop-blur">
+              <h3 className="font-semibold text-slate-100">Round Settlement</h3>
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between text-slate-300">
+                  <span>Drop Multiplier</span>
+                  <span>×{scoreToMultiplier(score).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Wheel Payout</span>
+                  <span>×{wheelPayout.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Session Bonus</span>
+                  <span>×{sessionBonus.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-800/60 pt-3 text-lg font-semibold text-slate-100">
+                  <span>Total Payout</span>
+                  <span>{turnsRemaining === 0 ? payout.toFixed(2) : '—'}</span>
+                </div>
+              </div>
             </div>
           </div>
-          <div className="bg-slate-900 rounded-lg p-4 text-sm space-y-2">
-            <h3 className="font-semibold">Audit Journal</h3>
-            <div className="max-h-40 overflow-y-auto space-y-1 text-xs text-slate-300">
-              {log.map((item, idx) => (
-                <div key={idx}>{item}</div>
-              ))}
-            </div>
-          </div>
-          <div className="bg-slate-900 rounded-lg p-4 text-sm">
-            <h3 className="font-semibold mb-2">Round Settlement</h3>
-            <div className="flex justify-between"><span>Drop Multiplier</span><span>×{scoreToMultiplier(score).toFixed(2)}</span></div>
-            <div className="flex justify-between"><span>Wheel Payout</span><span>×{wheelPayout.toFixed(2)}</span></div>
-            <div className="flex justify-between"><span>Session Bonus</span><span>×{sessionBonus.toFixed(2)}</span></div>
-            <div className="flex justify-between font-semibold text-lg mt-2">
-              <span>Total Payout</span>
-              <span>{turnsRemaining === 0 ? payout.toFixed(2) : '—'}</span>
-            </div>
-          </div>
-        </div>
-      </div>
+        </section>
 
-      <div className="bg-slate-900 rounded-lg p-4 text-sm text-slate-300 space-y-2">
-        <h3 className="font-semibold text-slate-100">How to play this prototype</h3>
-        <ul className="list-disc list-inside space-y-1">
-          <li>Each turn draws a tri or tetromino ritual piece from the commit-revealed queue.</li>
-          <li>Rotate once, then drop into the 7×10 chamber. Cascades score using color matches and royal sets.</li>
-          <li>After placement you can swap once or fire a stored power (⭐/⚡/🧿). Cascades refill the inventory.</li>
-          <li>Crafted K emerges when J and Q touch. J-Q-K lines trigger Royal Flush bursts; add a 7 to bloom sigils.</li>
-          <li>Collect 🪙 shards to raise the session multiplier (every three shards +0.25, capped at +1.00).</li>
-          <li>Final payout = wheel result × drop multiplier × session bonus. All data is logged for audit.</li>
-        </ul>
+        <section className="rounded-3xl border border-slate-800/60 bg-slate-900/70 p-6 text-sm text-slate-300 shadow-glow backdrop-blur">
+          <h3 className="font-display text-lg font-semibold text-slate-100">How to play this prototype</h3>
+          <ul className="mt-3 grid gap-2 md:grid-cols-2 md:gap-3">
+            <li className="rounded-2xl border border-slate-800/60 bg-slate-950/40 px-4 py-3">
+              Each turn draws a tri or tetromino ritual piece from the commit-revealed queue.
+            </li>
+            <li className="rounded-2xl border border-slate-800/60 bg-slate-950/40 px-4 py-3">
+              Rotate once, then drop into the 7×10 chamber. Cascades score using color matches and royal sets.
+            </li>
+            <li className="rounded-2xl border border-slate-800/60 bg-slate-950/40 px-4 py-3">
+              After placement you can swap once or fire a stored power (⭐/⚡/🧿). Cascades refill the inventory.
+            </li>
+            <li className="rounded-2xl border border-slate-800/60 bg-slate-950/40 px-4 py-3">
+              Crafted K emerges when J and Q touch. J-Q-K lines trigger Royal Flush bursts; add a 7 to bloom sigils.
+            </li>
+            <li className="rounded-2xl border border-slate-800/60 bg-slate-950/40 px-4 py-3">
+              Collect 🪙 shards to raise the session multiplier (every three shards +0.25, capped at +1.00).
+            </li>
+            <li className="rounded-2xl border border-slate-800/60 bg-slate-950/40 px-4 py-3">
+              Final payout = wheel result × drop multiplier × session bonus. All data is logged for audit.
+            </li>
+          </ul>
+        </section>
       </div>
     </div>
   );
