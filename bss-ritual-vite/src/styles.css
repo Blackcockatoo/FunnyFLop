@@ -1,9 +1,89 @@
-* { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
-body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #0b0d12; color: #e6e6e6; }
-.panel { background:#0f131b; border:1px solid #1e2430; border-radius:16px; padding:14px; }
-h1,h2,h3 { margin: 0 0 10px; }
-.recharts-wrapper { width: 100% !important; height: 360px !important; }
-.tabs { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
-.tab { padding:8px 12px; border-radius:12px; border:1px solid #1e2430; background:#0f131b; cursor:pointer; }
-.tab.active { background:#111a28; border-color:#2b3550; }
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #020617;
+  background-image: radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.18), transparent 55%),
+    radial-gradient(circle at 80% 0%, rgba(168, 85, 247, 0.15), transparent 60%),
+    radial-gradient(circle at 50% 80%, rgba(16, 185, 129, 0.12), transparent 65%);
+  color: #e2e8f0;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.45);
+  color: #020617;
+}
+
+.panel {
+  background: rgba(15, 23, 42, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 20px;
+  padding: 18px;
+  box-shadow: 0 28px 55px -38px rgba(56, 189, 248, 0.4);
+  backdrop-filter: blur(22px);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 10px;
+  font-family: 'Changa', 'Inter', ui-sans-serif, system-ui;
+  letter-spacing: 0.01em;
+}
+
+.recharts-wrapper {
+  width: 100% !important;
+  height: 360px !important;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.tab {
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.7);
+  cursor: pointer;
+  transition: all 180ms ease;
+}
+
+.tab:hover {
+  border-color: rgba(129, 140, 248, 0.45);
+  color: rgba(191, 219, 254, 0.9);
+}
+
+.tab.active {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: rgba(129, 140, 248, 0.6);
+  box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.35), 0 16px 45px -30px rgba(129, 140, 248, 0.5);
+}
+
+.scroll-track::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scroll-track::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 999px;
+}
+
+.scroll-track::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.55);
+  border-radius: 999px;
+}
